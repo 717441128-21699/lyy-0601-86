@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -16,17 +16,27 @@ import {
   CheckCircle,
   X,
   AlertCircle,
+  Settings,
+  History,
+  ChevronRight,
+  Square,
+  CheckSquare,
 } from 'lucide-react';
 import { useHealthStore } from '../store';
 import { formatDisplayDate, getAge } from '../utils/dateParser';
+import { cn } from '../lib/utils';
 
-const keyIndicators = [
+const indicatorConfig = [
   { name: '收缩压', category: '血压', icon: Heart, color: 'danger' },
   { name: '舒张压', category: '血压', icon: Heart, color: 'danger' },
   { name: '空腹血糖', category: '血糖', icon: Activity, color: 'warning' },
   { name: '总胆固醇', category: '血脂', icon: TrendingUp, color: 'warning' },
   { name: '甘油三酯', category: '血脂', icon: TrendingUp, color: 'warning' },
+  { name: '高密度脂蛋白胆固醇', category: '血脂', icon: TrendingUp, color: 'primary' },
+  { name: '低密度脂蛋白胆固醇', category: '血脂', icon: TrendingUp, color: 'danger' },
   { name: 'BMI', category: '一般检查', icon: Activity, color: 'primary' },
+  { name: '体重', category: '一般检查', icon: Activity, color: 'primary' },
+  { name: '身高', category: '一般检查', icon: Activity, color: 'primary' },
 ];
 
 const colorClasses = {
@@ -45,6 +55,10 @@ const bgColorClasses = {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const [showIndicatorSelector, setShowIndicatorSelector] = useState(false);
+  const [showImportHistory, setShowImportHistory] = useState(false);
+  const [selectedIndicators, setSelectedIndicators] = useState<string[]>([]);
+
   const {
     members,
     currentMemberId,
@@ -56,6 +70,9 @@ export default function DashboardPage() {
     reminders,
     lastImportResult,
     clearLastImportResult,
+    importHistory,
+    memberFavoriteIndicators,
+    setMemberFavoriteIndicators,
   } = useHealthStore((state) => ({
     members: state.members,
     currentMemberId: state.currentMemberId,
@@ -69,7 +86,27 @@ export default function DashboardPage() {
     reminders: state.reminders.filter((r) => r.memberId === state.currentMemberId),
     lastImportResult: state.lastImportResult,
     clearLastImportResult: state.clearLastImportResult,
+    importHistory: state.importHistory,
+    memberFavoriteIndicators: state.memberFavoriteIndicators,
+    setMemberFavoriteIndicators: state.setMemberFavoriteIndicators,
   }));
+
+  const keyIndicators = useMemo(() => {
+    if (!currentMemberId) return indicatorConfig.slice(0, 6);
+    const favorites = memberFavoriteIndicators[currentMemberId];
+    if (favorites && favorites.length > 0) {
+      return indicatorConfig.filter((i) => favorites.includes(i.name));
+    }
+    return indicatorConfig.slice(0, 6);
+  }, [currentMemberId, memberFavoriteIndicators]);
+
+  useEffect(() => {
+    if (currentMemberId && memberFavoriteIndicators[currentMemberId]) {
+      setSelectedIndicators(memberFavoriteIndicators[currentMemberId]);
+    } else {
+      setSelectedIndicators(indicatorConfig.slice(0, 6).map((i) => i.name));
+    }
+  }, [currentMemberId, memberFavoriteIndicators]);
 
   useEffect(() => {
     if (lastImportResult) {
@@ -261,7 +298,30 @@ export default function DashboardPage() {
       </div>
 
       <div>
-        <h2 className="text-lg font-bold text-gray-800 mb-4">关键指标</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-800">关键指标</h2>
+          <div className="flex items-center gap-2">
+            {importHistory.length > 0 && (
+              <button
+                onClick={() => setShowImportHistory(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <History className="w-4 h-4" />
+                最近导入
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setSelectedIndicators(keyIndicators.map((i) => i.name));
+                setShowIndicatorSelector(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            >
+              <Settings className="w-4 h-4" />
+              自定义
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-4">
           {keyIndicators.map((item) => {
             const data = getIndicatorLatestValue(item.name);
@@ -494,6 +554,162 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {showIndicatorSelector && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowIndicatorSelector(false)}
+          />
+          <div className="relative bg-white rounded-2xl w-full max-w-md p-6 mx-4 animate-slide-up max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-800">自定义关键指标</h2>
+              <button
+                onClick={() => setShowIndicatorSelector(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-500 mb-4">选择您想在看板上关注的指标（最多6项）</p>
+
+            <div className="space-y-2 mb-6">
+              {indicatorConfig.map((item) => {
+                const isSelected = selectedIndicators.includes(item.name);
+                return (
+                  <button
+                    key={item.name}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSelectedIndicators((prev) => prev.filter((i) => i !== item.name));
+                      } else if (selectedIndicators.length < 6) {
+                        setSelectedIndicators((prev) => [...prev, item.name]);
+                      }
+                    }}
+                    className={cn(
+                      'w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left',
+                      isSelected
+                        ? 'border-primary-300 bg-primary-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    )}
+                    disabled={!isSelected && selectedIndicators.length >= 6}
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="w-5 h-5 text-primary-500 flex-shrink-0" />
+                    ) : (
+                      <Square className="w-5 h-5 text-gray-300 flex-shrink-0" />
+                    )}
+                    <div className={`w-8 h-8 rounded-lg ${bgColorClasses[item.color as keyof typeof bgColorClasses]} flex items-center justify-center flex-shrink-0`}>
+                      <item.icon className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-800">{item.name}</p>
+                      <p className="text-xs text-gray-500">{item.category}</p>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowIndicatorSelector(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (currentMemberId && selectedIndicators.length > 0) {
+                    setMemberFavoriteIndicators(currentMemberId, selectedIndicators);
+                    setShowIndicatorSelector(false);
+                  }
+                }}
+                disabled={selectedIndicators.length === 0}
+                className="flex-1 px-4 py-2.5 bg-primary-500 text-white rounded-xl hover:bg-primary-600 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+              >
+                保存选择
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showImportHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50"
+            onClick={() => setShowImportHistory(false)}
+          />
+          <div className="relative bg-white rounded-2xl w-full max-w-lg p-6 mx-4 animate-slide-up max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-gray-800">最近导入记录</h2>
+              <button
+                onClick={() => setShowImportHistory(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+
+            {importHistory.length === 0 ? (
+              <div className="text-center py-12">
+                <History className="w-16 h-16 mx-auto text-gray-300 mb-3" />
+                <p className="text-gray-500">暂无导入记录</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {importHistory.map((record, index) => (
+                  <div
+                    key={index}
+                    className="p-4 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors cursor-pointer group"
+                    onClick={() => {
+                      setShowImportHistory(false);
+                      if (record.memberId !== currentMemberId) {
+                        useHealthStore.getState().setCurrentMember(record.memberId);
+                      }
+                      navigate('/data');
+                    }}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-success-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                          <CheckCircle className="w-5 h-5 text-success-600" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-medium text-gray-800">{record.memberName}</p>
+                            <span className="text-xs text-gray-500">
+                              {formatDisplayDate(record.examDate)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {new Date(record.importedAt).toLocaleString('zh-CN')}
+                          </p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-gray-400 group-hover:text-primary-500 transition-colors" />
+                    </div>
+                    <div className="flex items-center gap-4 mt-3 pl-12">
+                      <span className="text-sm text-gray-600">
+                        导入指标：<span className="font-semibold text-gray-800">{record.totalCount} 项</span>
+                      </span>
+                      {record.abnormalCount > 0 ? (
+                        <span className="text-sm text-warning-600">
+                          异常：<span className="font-semibold">{record.abnormalCount} 项</span>
+                        </span>
+                      ) : (
+                        <span className="text-sm text-success-600 font-semibold">全部正常</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

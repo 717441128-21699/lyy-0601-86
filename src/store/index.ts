@@ -33,6 +33,7 @@ interface ImportResult {
   abnormalCount: number;
   reportId: string;
   examDate: string;
+  importedAt: string;
 }
 
 interface StoreState extends AppState, HealthData {
@@ -45,6 +46,7 @@ interface StoreState extends AppState, HealthData {
   loadData: (key?: string) => boolean;
   lastImportResult: ImportResult | null;
   clearLastImportResult: () => void;
+  importHistory: ImportResult[];
   addMember: (member: Omit<FamilyMember, 'id' | 'createdAt' | 'isActive'>) => string;
   updateMember: (id: string, member: Partial<FamilyMember>) => void;
   deleteMember: (id: string) => void;
@@ -66,7 +68,9 @@ interface StoreState extends AppState, HealthData {
   updateSettings: (settings: Partial<AppSettings>) => void;
   resetAllData: () => void;
   loadMockData: () => void;
-  setLastImportResult: (result: ImportResult | null) => void;
+  setLastImportResult: (result: Omit<ImportResult, 'importedAt'> | null) => void;
+  memberFavoriteIndicators: Record<string, string[]>;
+  setMemberFavoriteIndicators: (memberId: string, indicators: string[]) => void;
 }
 
 const initialSettings: AppSettings = {
@@ -85,12 +89,14 @@ const initialHealthData: HealthData = {
   dictionary: DEFAULT_DICTIONARY,
 };
 
-const initialAppState: AppState & { lastImportResult: ImportResult | null } = {
+const initialAppState: AppState & { lastImportResult: ImportResult | null; importHistory: ImportResult[]; memberFavoriteIndicators: Record<string, string[]> } = {
   isLocked: true,
   isInitialized: false,
   currentMemberId: null,
   settings: initialSettings,
   lastImportResult: null,
+  importHistory: [],
+  memberFavoriteIndicators: {},
 };
 
 export const useHealthStore = create<StoreState>((set, get) => ({
@@ -412,12 +418,29 @@ export const useHealthStore = create<StoreState>((set, get) => ({
     get().saveData();
   },
 
-  setLastImportResult: (result) => {
-    set({ lastImportResult: result });
-  },
+  setLastImportResult: (result: Omit<ImportResult, 'importedAt'> | null) => {
+      if (result) {
+        const resultWithTime: ImportResult = { ...result, importedAt: new Date().toISOString() };
+        set((state) => ({
+          lastImportResult: resultWithTime,
+          importHistory: [resultWithTime, ...state.importHistory].slice(0, 20),
+        }));
+      } else {
+        set({ lastImportResult: null });
+      }
+    },
 
   clearLastImportResult: () => {
     set({ lastImportResult: null });
+  },
+
+  setMemberFavoriteIndicators: (memberId, indicators) => {
+    set((state) => ({
+      memberFavoriteIndicators: {
+        ...state.memberFavoriteIndicators,
+        [memberId]: indicators,
+      },
+    }));
   },
 }));
 
