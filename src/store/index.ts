@@ -26,6 +26,15 @@ import {
 import { DEFAULT_DICTIONARY, generateId, parseReferenceRange, determineStatus } from '../utils/indicatorParser';
 import { createMockData } from '../utils/mockData';
 
+interface ImportResult {
+  memberId: string;
+  memberName: string;
+  totalCount: number;
+  abnormalCount: number;
+  reportId: string;
+  examDate: string;
+}
+
 interface StoreState extends AppState, HealthData {
   unlock: (password: string) => Promise<boolean>;
   initialize: (password: string) => Promise<boolean>;
@@ -34,7 +43,9 @@ interface StoreState extends AppState, HealthData {
   setCurrentMember: (memberId: string | null) => void;
   saveData: () => void;
   loadData: (key?: string) => boolean;
-  addMember: (member: Omit<FamilyMember, 'id' | 'createdAt' | 'isActive'>) => void;
+  lastImportResult: ImportResult | null;
+  clearLastImportResult: () => void;
+  addMember: (member: Omit<FamilyMember, 'id' | 'createdAt' | 'isActive'>) => string;
   updateMember: (id: string, member: Partial<FamilyMember>) => void;
   deleteMember: (id: string) => void;
   addReport: (report: Omit<HealthReport, 'id' | 'createdAt'>) => string;
@@ -55,6 +66,7 @@ interface StoreState extends AppState, HealthData {
   updateSettings: (settings: Partial<AppSettings>) => void;
   resetAllData: () => void;
   loadMockData: () => void;
+  setLastImportResult: (result: ImportResult | null) => void;
 }
 
 const initialSettings: AppSettings = {
@@ -73,11 +85,12 @@ const initialHealthData: HealthData = {
   dictionary: DEFAULT_DICTIONARY,
 };
 
-const initialAppState: AppState = {
+const initialAppState: AppState & { lastImportResult: ImportResult | null } = {
   isLocked: true,
   isInitialized: false,
   currentMemberId: null,
   settings: initialSettings,
+  lastImportResult: null,
 };
 
 export const useHealthStore = create<StoreState>((set, get) => ({
@@ -202,6 +215,7 @@ export const useHealthStore = create<StoreState>((set, get) => ({
       currentMemberId: state.currentMemberId || newMember.id,
     }));
     get().saveData();
+    return newMember.id;
   },
 
   updateMember: (id, updates) => {
@@ -396,6 +410,14 @@ export const useHealthStore = create<StoreState>((set, get) => ({
       currentMemberId: mockData.members[0]?.id || null,
     });
     get().saveData();
+  },
+
+  setLastImportResult: (result) => {
+    set({ lastImportResult: result });
+  },
+
+  clearLastImportResult: () => {
+    set({ lastImportResult: null });
   },
 }));
 

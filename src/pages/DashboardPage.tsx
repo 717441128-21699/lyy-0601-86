@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Activity,
@@ -13,6 +13,9 @@ import {
   Calendar,
   Pill,
   Stethoscope,
+  CheckCircle,
+  X,
+  AlertCircle,
 } from 'lucide-react';
 import { useHealthStore } from '../store';
 import { formatDisplayDate, getAge } from '../utils/dateParser';
@@ -51,6 +54,8 @@ export default function DashboardPage() {
     medications,
     advices,
     reminders,
+    lastImportResult,
+    clearLastImportResult,
   } = useHealthStore((state) => ({
     members: state.members,
     currentMemberId: state.currentMemberId,
@@ -62,7 +67,18 @@ export default function DashboardPage() {
     medications: state.medications.filter((m) => m.memberId === state.currentMemberId),
     advices: state.advices.filter((a) => a.memberId === state.currentMemberId),
     reminders: state.reminders.filter((r) => r.memberId === state.currentMemberId),
+    lastImportResult: state.lastImportResult,
+    clearLastImportResult: state.clearLastImportResult,
   }));
+
+  useEffect(() => {
+    if (lastImportResult) {
+      const timer = setTimeout(() => {
+        clearLastImportResult();
+      }, 10000);
+      return () => clearTimeout(timer);
+    }
+  }, [lastImportResult, clearLastImportResult]);
 
   const currentMember = members.find((m) => m.id === currentMemberId);
 
@@ -128,6 +144,44 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {lastImportResult && lastImportResult.memberId === currentMemberId && (
+        <div className="bg-success-50 border border-success-200 rounded-2xl p-5 flex items-start gap-4 animate-slide-down">
+          <div className="w-12 h-12 bg-success-100 rounded-xl flex items-center justify-center flex-shrink-0">
+            <CheckCircle className="w-6 h-6 text-success-600" />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-bold text-success-800 text-lg">报告导入成功！</h3>
+            <p className="text-success-700 mt-1">
+              {formatDisplayDate(lastImportResult.examDate)} 的体检报告已成功导入
+            </p>
+            <div className="flex items-center gap-6 mt-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-success-600">导入指标：</span>
+                <span className="font-bold text-success-700 text-lg">{lastImportResult.totalCount} 项</span>
+              </div>
+              {lastImportResult.abnormalCount > 0 ? (
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-warning-500" />
+                  <span className="text-sm text-warning-600">其中异常：</span>
+                  <span className="font-bold text-warning-700 text-lg">{lastImportResult.abnormalCount} 项</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-success-500" />
+                  <span className="text-sm text-success-600">全部正常，太棒了！</span>
+                </div>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={clearLastImportResult}
+            className="p-2 hover:bg-success-100 rounded-lg transition-colors text-success-600"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      )}
+
       <div className="bg-gradient-to-r from-primary-500 to-primary-600 rounded-2xl p-6 text-white shadow-xl">
         <div className="flex items-start justify-between">
           <div>
