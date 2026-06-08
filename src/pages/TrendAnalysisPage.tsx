@@ -17,6 +17,7 @@ import {
   Calendar,
   Users,
   Check,
+  AlertCircle,
 } from 'lucide-react';
 import { useHealthStore } from '../store';
 import { formatDisplayDate, getYear } from '../utils/dateParser';
@@ -38,6 +39,7 @@ const indicatorConfig = {
 };
 
 type Category = '血压' | '血糖' | '血脂';
+type AlignType = 'month' | 'day';
 
 export default function TrendAnalysisPage() {
   const navigate = useNavigate();
@@ -45,6 +47,7 @@ export default function TrendAnalysisPage() {
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>(['收缩压', '舒张压']);
   const [timeRange, setTimeRange] = useState<string>('全部');
   const [compareYear, setCompareYear] = useState<string | null>(null);
+  const [alignType, setAlignType] = useState<AlignType>('month');
 
   const { members, currentMemberId, indicators } = useHealthStore((state) => ({
     members: state.members,
@@ -64,46 +67,134 @@ export default function TrendAnalysisPage() {
     [selectedIndicators, selectedCategory]
   );
 
-  const buildChartData = useCallback((yearFilter?: number) => {
-    let filtered = indicators.filter((i) => activeIndicators.includes(i.indicatorName));
-    if (yearFilter) {
-      filtered = filtered.filter((i) => getYear(i.examDate) === yearFilter);
-    } else if (timeRange !== '全部') {
-      const now = new Date();
-      const months = parseInt(timeRange, 10);
-      const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
-      filtered = filtered.filter((i) => new Date(i.examDate) >= cutoff);
-    }
-    const grouped: Record<string, Record<string, number | string>> = {};
-    filtered.forEach((i) => {
-      const key = yearFilter ? i.examDate.slice(5) : i.examDate;
-      if (!grouped[key]) {
-        grouped[key] = {
-          date: i.examDate,
-          displayDate: yearFilter ? i.examDate.slice(5) : formatDisplayDate(i.examDate),
-        };
-      }
-      if (i.numericValue !== undefined) {
-        const dataKey = yearFilter ? `${i.indicatorName}(${yearFilter}年)` : i.indicatorName;
-        grouped[key][dataKey] = i.numericValue;
-      }
-    });
-    return Object.values(grouped).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  }, [indicators, activeIndicators, timeRange]);
+  const getMonthKey = (date: string) => {
+    const d = new Date(date);
+    return `${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
 
-  const chartData = useMemo(() => buildChartData(), [buildChartData]);
-  const comparisonData = useMemo(
-    () => (compareYear ? buildChartData(parseInt(compareYear, 10)) : null),
-    [buildChartData, compareYear]
+  const getMonthDayKey = (date: string) => {
+    const d = new Date(date);
+    return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const getDisplayLabel = (key: string) => {
+    if (alignType === 'month') {
+      return `${parseInt(key, 10)}月`;
+    }
+    return key;
+  };
+
+  const buildYearData = useCallback(
+    (year: number, yearLabel: string) => {
+      let filtered = indicators.filter(
+        (i) => activeIndicators.includes(i.indicatorName) && getYear(i.examDate) === year
+      );
+
+      if (timeRange !== '全部' && year === availableYears[0]) {
+        const now = new Date();
+        const months = parseInt(timeRange, 10);
+        const cutoff = new Date(now.getFullYear(), now.getMonth() - months, now.getDate());
+        filtered = filtered.filter((i) => new Date(i.examDate) >= cutoff);
+      }
+
+      const grouped: Record<string, Record<string, number | string>> = {};
+
+      filtered.forEach((i) => {
+        if (i.numericValue === undefined) return;
+
+        const key = alignType === 'month' ? getMonthKey(i.examDate) : getMonthDayKey(i.examDate);
+
+        if (!grouped[key]) {
+          grouped[key] = {
+            key,
+            displayLabel: getDisplayLabel(key),
+            sortKey: key,
+          };
+        }
+
+        const valuesForIndicator = filtered.filter(
+          (f) =>
+            f.indicatorName === i.indicatorName &&
+            (alignType === 'month'
+              ? getMonthKey(f.examDate) === key
+              : getMonthDayKey(f.examDate) === key)
+        );
+
+        if (valuesForIndicator.length > 0) {
+          const avgValue =
+            valuesForIndicator.reduce((sum, v) => sum + (v.numericValue || 0), 0) /
+            valuesForIndicator.length;
+          grouped[key][`${i.indicatorName}(${yearLabel})`] = Math.round(avgValue * 100) / 100;
+          grouped[key][`${i.indicatorName}(${yearLabel})_date`] = formatDisplayDate(i.examDate);
+        }
+      });
+
+      return Object.values(grouped).sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
+    },
+    [indicators, activeIndicators, alignType, timeRange, availableYears]
   );
 
+  const allKeys = useMemo(() => {
+    if (!compareYear) return [];
+
+    const currentYear = availableYears[0];
+    if (!currentYear) return [];
+
+    const compareYearNum = parseInt(compareYear, 10);
+    const keys = new Set<string>();
+
+    indicators
+      .filter(
+        (i) =>
+          activeIndicators.includes(i.indicatorName) &&
+          (getYear(i.examDate) === currentYear || getYear(i.examDate) === compareYearNum)
+      )
+      .forEach((i) => {
+        const key = alignType === 'month' ? getMonthKey(i.examDate) : getMonthDayKey(i.examDate);
+        keys.add(key);
+      });
+
+    return Array.from(keys).sort();
+  }, [indicators, activeIndicators, compareYear, alignType, availableYears]);
+
+  const chartData = useMemo(() => {
+    if (availableYears.length === 0) return [];
+    const currentYear = availableYears[0];
+    return buildYearData(currentYear, '今年');
+  }, [buildYearData, availableYears]);
+
+  const comparisonData = useMemo(() => {
+    if (!compareYear) return null;
+    return buildYearData(parseInt(compareYear, 10), `${compareYear}年`);
+  }, [buildYearData, compareYear]);
+
   const mergedData = useMemo(() => {
-    if (!comparisonData) return chartData;
+    if (!comparisonData || allKeys.length === 0) return chartData;
+
     const merged: Record<string, Record<string, number | string>> = {};
-    chartData.forEach((d) => { merged[String(d.displayDate).slice(-5)] = { ...d }; });
-    comparisonData.forEach((d) => { merged[String(d.displayDate)] = { ...merged[String(d.displayDate)], ...d }; });
-    return Object.values(merged).sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  }, [chartData, comparisonData]);
+
+    allKeys.forEach((key) => {
+      merged[key] = {
+        key,
+        displayLabel: getDisplayLabel(key),
+        sortKey: key,
+      };
+    });
+
+    chartData.forEach((d) => {
+      if (merged[d.key as string]) {
+        merged[d.key as string] = { ...merged[d.key as string], ...d };
+      }
+    });
+
+    comparisonData.forEach((d) => {
+      if (merged[d.key as string]) {
+        merged[d.key as string] = { ...merged[d.key as string], ...d };
+      }
+    });
+
+    return Object.values(merged).sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
+  }, [chartData, comparisonData, allKeys]);
 
   const toggleIndicator = (name: string) => {
     setSelectedIndicators((prev) =>
@@ -121,31 +212,62 @@ export default function TrendAnalysisPage() {
     activeIndicators.forEach((name) => {
       lines.push(
         <Line
-          key={name}
+          key={`${name}-current`}
           type="monotone"
-          dataKey={name}
+          dataKey={`${name}(今年)`}
           stroke={getLineColor(name)}
-          strokeWidth={2}
-          dot={{ r: 4, strokeWidth: 2 }}
-          activeDot={{ r: 6 }}
+          strokeWidth={3}
+          dot={{ r: 5, strokeWidth: 2, fill: '#fff' }}
+          activeDot={{ r: 7 }}
+          connectNulls={false}
         />
       );
       if (compareYear) {
-        const compareKey = `${name}(${compareYear}年)`;
         lines.push(
           <Line
-            key={compareKey}
+            key={`${name}-compare`}
             type="monotone"
-            dataKey={compareKey}
+            dataKey={`${name}(${compareYear}年)`}
             stroke={getLineColor(name)}
             strokeWidth={2}
-            strokeDasharray="5 5"
-            dot={{ r: 4, strokeWidth: 2 }}
+            strokeDasharray="6 4"
+            dot={{ r: 4, strokeWidth: 2, fill: '#fff' }}
+            activeDot={{ r: 6 }}
+            connectNulls={false}
           />
         );
       }
     });
     return lines;
+  };
+
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    if (active && payload && payload.length) {
+      return (
+        <div className="bg-white border border-gray-200 rounded-xl shadow-lg p-3">
+          <p className="font-semibold text-gray-800 mb-2">{label}</p>
+          {payload.map((entry: any, index: number) => {
+            const isCurrent = entry.dataKey.includes('(今年)');
+            const indicatorName = entry.dataKey.split('(')[0];
+            return (
+              <div key={index} className="flex items-center gap-2 text-sm">
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className={isCurrent ? 'font-medium text-gray-800' : 'text-gray-500'}>
+                  {entry.dataKey}:
+                </span>
+                <span className={isCurrent ? 'font-semibold' : ''} style={{ color: entry.color }}>
+                  {entry.value}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    return null;
   };
 
   if (!currentMember) {
@@ -200,6 +322,32 @@ export default function TrendAnalysisPage() {
           </div>
 
           <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-700">对齐方式</label>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setAlignType('month')}
+                className={`px-4 py-2 rounded-xl text-sm transition-colors ${
+                  alignType === 'month'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                按月份对齐
+              </button>
+              <button
+                onClick={() => setAlignType('day')}
+                className={`px-4 py-2 rounded-xl text-sm transition-colors ${
+                  alignType === 'day'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                按日期对齐
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">时间范围</label>
             <div className="flex items-center gap-2">
               <Calendar className="w-4 h-4 text-gray-400" />
@@ -224,11 +372,13 @@ export default function TrendAnalysisPage() {
               className="px-3 py-2 rounded-xl text-sm bg-gray-100 text-gray-700 border-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="">不对比</option>
-              {availableYears.map((year) => (
-                <option key={year} value={year.toString()}>
-                  {year}年
-                </option>
-              ))}
+              {availableYears
+                .filter((y) => y !== availableYears[0])
+                .map((year) => (
+                  <option key={year} value={year.toString()}>
+                    {year}年
+                  </option>
+                ))}
             </select>
           </div>
         </div>
@@ -253,12 +403,31 @@ export default function TrendAnalysisPage() {
             ))}
           </div>
         </div>
+
+        {compareYear && (
+          <div className="mt-4 pt-4 border-t border-gray-100">
+            <div className="flex items-center gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-0.5 bg-gray-600" />
+                <span className="text-gray-600">今年（实线）</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-0.5 bg-gray-400" style={{ backgroundImage: 'repeating-linear-gradient(90deg, #9ca3af, #9ca3af 3px, transparent 3px, transparent 6px)' }} />
+                <span className="text-gray-600">{compareYear}年（虚线）</span>
+              </div>
+              <div className="flex items-center gap-1 text-gray-500">
+                <AlertCircle className="w-4 h-4" />
+                <span>无数据的月份不会连线</span>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
         <h2 className="text-lg font-bold text-gray-800 mb-4">
           {selectedCategory}趋势图
-          {compareYear && <span className="text-sm font-normal text-gray-500 ml-2">（与{compareYear}年对比）</span>}
+          {compareYear && <span className="text-sm font-normal text-gray-500 ml-2">（今年 vs {compareYear}年）</span>}
         </h2>
         {mergedData.length === 0 ? (
           <div className="h-80 flex items-center justify-center text-gray-400">暂无数据</div>
@@ -267,17 +436,14 @@ export default function TrendAnalysisPage() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={mergedData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <XAxis dataKey="displayDate" tick={{ fontSize: 12, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: '12px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                  }}
-                  labelStyle={{ fontWeight: 600, color: '#374151' }}
+                <XAxis
+                  dataKey="displayLabel"
+                  tick={{ fontSize: 12, fill: '#6b7280' }}
+                  tickLine={false}
+                  axisLine={{ stroke: '#e5e7eb' }}
                 />
+                <YAxis tick={{ fontSize: 12, fill: '#6b7280' }} tickLine={false} axisLine={{ stroke: '#e5e7eb' }} />
+                <Tooltip content={<CustomTooltip />} />
                 <Legend wrapperStyle={{ paddingTop: '20px' }} iconType="line" />
                 {renderLines()}
               </LineChart>

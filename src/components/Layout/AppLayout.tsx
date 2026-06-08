@@ -3,9 +3,11 @@ import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { useHealthStore } from '../../store';
 import { Navigate } from 'react-router-dom';
+import { useAutoLock } from '../../hooks/useAutoLock';
 
 export function AppLayout() {
   const { isLocked, isInitialized, members } = useHealthStore();
+  useAutoLock();
 
   if (isLocked) {
     return <Navigate to="/login" replace />;

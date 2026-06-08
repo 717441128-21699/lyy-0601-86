@@ -23,16 +23,17 @@ import {
   hasStoredData,
   clearAllData,
 } from '../utils/encryption';
-import { DEFAULT_DICTIONARY, generateId } from '../utils/indicatorParser';
+import { DEFAULT_DICTIONARY, generateId, parseReferenceRange, determineStatus } from '../utils/indicatorParser';
 import { createMockData } from '../utils/mockData';
 
 interface StoreState extends AppState, HealthData {
   unlock: (password: string) => Promise<boolean>;
   initialize: (password: string) => Promise<boolean>;
+  changePassword: (oldPassword: string, newPassword: string) => Promise<boolean>;
   lock: () => void;
   setCurrentMember: (memberId: string | null) => void;
   saveData: () => void;
-  loadData: () => boolean;
+  loadData: (key?: string) => boolean;
   addMember: (member: Omit<FamilyMember, 'id' | 'createdAt' | 'isActive'>) => void;
   updateMember: (id: string, member: Partial<FamilyMember>) => void;
   deleteMember: (id: string) => void;
@@ -92,7 +93,7 @@ export const useHealthStore = create<StoreState>((set, get) => ({
     }
 
     const key = generateKey(password);
-    const success = get().loadData();
+    const success = get().loadData(key);
 
     if (success) {
       set({ isLocked: false, encryptionKey: key });
@@ -100,6 +101,28 @@ export const useHealthStore = create<StoreState>((set, get) => ({
     }
 
     return false;
+  },
+
+  changePassword: async (oldPassword: string, newPassword: string) => {
+    const currentHash = getPasswordHash();
+    if (!currentHash) return false;
+
+    if (!verifyPassword(oldPassword, currentHash)) {
+      return false;
+    }
+
+    const oldKey = generateKey(oldPassword);
+    const newKey = generateKey(newPassword);
+
+    const { encryptionKey, settings, ...healthData } = get();
+    const dataToSave = { ...healthData, settings };
+    saveEncryptedData(dataToSave, newKey);
+
+    const newHash = hashPassword(newPassword);
+    savePasswordHash(newHash);
+
+    set({ encryptionKey: newKey });
+    return true;
   },
 
   initialize: async (password: string) => {
@@ -142,8 +165,8 @@ export const useHealthStore = create<StoreState>((set, get) => ({
     saveEncryptedData(dataToSave, encryptionKey);
   },
 
-  loadData: () => {
-    const { encryptionKey } = get();
+  loadData: (key?: string) => {
+    const encryptionKey = key || get().encryptionKey;
     if (!encryptionKey) return false;
 
     const data = loadEncryptedData<HealthData & { settings: AppSettings }>(encryptionKey);
@@ -223,9 +246,28 @@ export const useHealthStore = create<StoreState>((set, get) => ({
 
   updateIndicator: (id, updates) => {
     set((state) => ({
-      indicators: state.indicators.map((i) =>
-        i.id === id ? { ...i, ...updates, manualEdited: true } : i
-      ),
+      indicators: state.indicators.map((i) => {
+        if (i.id !== id) return i;
+        const updated = { ...i, ...updates, manualEdited: true };
+        if (updates.value !== undefined || updates.referenceRange !== undefined) {
+          const numericValue = parseFloat(updated.value);
+          const { minValue, maxValue } = parseReferenceRange(updated.referenceRange || '');
+          const { status, isAbnormal } = determineStatus(
+            isNaN(numericValue) ? undefined : numericValue,
+            minValue,
+            maxValue
+          );
+          return {
+            ...updated,
+            numericValue: isNaN(numericValue) ? undefined : numericValue,
+            minValue,
+            maxValue,
+            status,
+            isAbnormal,
+          };
+        }
+        return updated;
+      }),
     }));
     get().saveData();
   },

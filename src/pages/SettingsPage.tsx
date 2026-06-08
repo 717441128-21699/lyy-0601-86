@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import { useHealthStore } from '../store';
 import { useTheme } from '../hooks/useTheme';
-import { hashPassword, verifyPassword, savePasswordHash, getPasswordHash } from '../utils/encryption';
+
 
 const autoLockOptions = [
   { value: 60, label: '1分钟' },
@@ -27,7 +27,7 @@ const autoLockOptions = [
 type ModalType = 'password' | 'clear' | 'loadMock' | null;
 
 export default function SettingsPage() {
-  const { settings, updateSettings, resetAllData, loadMockData, encryptionKey } = useHealthStore();
+  const { settings, updateSettings, resetAllData, loadMockData, encryptionKey, changePassword } = useHealthStore();
   const { theme, toggleTheme } = useTheme();
 
   const [showModal, setShowModal] = useState<ModalType>(null);
@@ -52,18 +52,9 @@ export default function SettingsPage() {
     setPasswordSuccess(false);
   };
 
-  const handleChangePassword = () => {
+  const handleChangePassword = async () => {
     setPasswordError('');
     setPasswordSuccess(false);
-    const currentHash = getPasswordHash();
-    if (!currentHash) {
-      setPasswordError('未设置密码，请先初始化应用');
-      return;
-    }
-    if (!verifyPassword(oldPassword, currentHash)) {
-      setPasswordError('原密码错误');
-      return;
-    }
     if (newPassword.length < 6) {
       setPasswordError('新密码至少需要6位');
       return;
@@ -72,10 +63,14 @@ export default function SettingsPage() {
       setPasswordError('两次输入的密码不一致');
       return;
     }
-    savePasswordHash(hashPassword(newPassword));
-    setPasswordSuccess(true);
-    showNotification('success', '密码修改成功');
-    setTimeout(() => closeModal(), 1500);
+    const success = await changePassword(oldPassword, newPassword);
+    if (success) {
+      setPasswordSuccess(true);
+      showNotification('success', '密码修改成功');
+      setTimeout(() => closeModal(), 1500);
+    } else {
+      setPasswordError('原密码错误');
+    }
   };
 
   const handleAutoLockChange = (value: number) => {
