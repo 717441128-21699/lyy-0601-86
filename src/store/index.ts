@@ -1,0 +1,362 @@
+import { create } from 'zustand';
+import type {
+  AppState,
+  HealthData,
+  FamilyMember,
+  HealthReport,
+  HealthIndicator,
+  MedicationNote,
+  DoctorAdvice,
+  FollowUpReminder,
+  IndicatorDictionary,
+  AppSettings,
+} from '../types';
+import {
+  generateKey,
+  verifyPassword,
+  hashPassword,
+  savePasswordHash,
+  getPasswordHash,
+  saveEncryptedData,
+  loadEncryptedData,
+  hasPasswordHash,
+  hasStoredData,
+  clearAllData,
+} from '../utils/encryption';
+import { DEFAULT_DICTIONARY, generateId } from '../utils/indicatorParser';
+import { createMockData } from '../utils/mockData';
+
+interface StoreState extends AppState, HealthData {
+  unlock: (password: string) => Promise<boolean>;
+  initialize: (password: string) => Promise<boolean>;
+  lock: () => void;
+  setCurrentMember: (memberId: string | null) => void;
+  saveData: () => void;
+  loadData: () => boolean;
+  addMember: (member: Omit<FamilyMember, 'id' | 'createdAt' | 'isActive'>) => void;
+  updateMember: (id: string, member: Partial<FamilyMember>) => void;
+  deleteMember: (id: string) => void;
+  addReport: (report: Omit<HealthReport, 'id' | 'createdAt'>) => string;
+  addIndicators: (indicators: Array<Omit<HealthIndicator, 'id'>>) => void;
+  updateIndicator: (id: string, updates: Partial<HealthIndicator>) => void;
+  deleteIndicator: (id: string) => void;
+  addMedication: (medication: Omit<MedicationNote, 'id'>) => void;
+  updateMedication: (id: string, updates: Partial<MedicationNote>) => void;
+  deleteMedication: (id: string) => void;
+  addAdvice: (advice: Omit<DoctorAdvice, 'id'>) => void;
+  updateAdvice: (id: string, updates: Partial<DoctorAdvice>) => void;
+  deleteAdvice: (id: string) => void;
+  addReminder: (reminder: Omit<FollowUpReminder, 'id'>) => void;
+  updateReminder: (id: string, updates: Partial<FollowUpReminder>) => void;
+  deleteReminder: (id: string) => void;
+  addDictionaryItem: (item: Omit<IndicatorDictionary, 'id'>) => void;
+  updateDictionaryItem: (id: string, updates: Partial<IndicatorDictionary>) => void;
+  updateSettings: (settings: Partial<AppSettings>) => void;
+  resetAllData: () => void;
+  loadMockData: () => void;
+}
+
+const initialSettings: AppSettings = {
+  autoLockTimeout: 300,
+  theme: 'light',
+  language: 'zh-CN',
+};
+
+const initialHealthData: HealthData = {
+  members: [],
+  reports: [],
+  indicators: [],
+  medications: [],
+  advices: [],
+  reminders: [],
+  dictionary: DEFAULT_DICTIONARY,
+};
+
+const initialAppState: AppState = {
+  isLocked: true,
+  isInitialized: false,
+  currentMemberId: null,
+  settings: initialSettings,
+};
+
+export const useHealthStore = create<StoreState>((set, get) => ({
+  ...initialAppState,
+  ...initialHealthData,
+
+  unlock: async (password: string) => {
+    const passwordHash = getPasswordHash();
+    if (!passwordHash) return false;
+
+    if (!verifyPassword(password, passwordHash)) {
+      return false;
+    }
+
+    const key = generateKey(password);
+    const success = get().loadData();
+
+    if (success) {
+      set({ isLocked: false, encryptionKey: key });
+      return true;
+    }
+
+    return false;
+  },
+
+  initialize: async (password: string) => {
+    const hash = hashPassword(password);
+    savePasswordHash(hash);
+
+    const key = generateKey(password);
+    const data = {
+      ...initialHealthData,
+      settings: initialSettings,
+    };
+    saveEncryptedData(data, key);
+
+    set({
+      ...initialHealthData,
+      isLocked: false,
+      isInitialized: true,
+      encryptionKey: key,
+    });
+
+    return true;
+  },
+
+  lock: () => {
+    set({ isLocked: true, encryptionKey: undefined });
+  },
+
+  setCurrentMember: (memberId: string | null) => {
+    set({ currentMemberId: memberId });
+  },
+
+  saveData: () => {
+    const { encryptionKey, settings, ...healthData } = get();
+    if (!encryptionKey) return;
+
+    const dataToSave = {
+      ...healthData,
+      settings,
+    };
+    saveEncryptedData(dataToSave, encryptionKey);
+  },
+
+  loadData: () => {
+    const { encryptionKey } = get();
+    if (!encryptionKey) return false;
+
+    const data = loadEncryptedData<HealthData & { settings: AppSettings }>(encryptionKey);
+    if (!data) return false;
+
+    const hasData = data.members && data.members.length > 0;
+
+    set({
+      members: data.members || [],
+      reports: data.reports || [],
+      indicators: data.indicators || [],
+      medications: data.medications || [],
+      advices: data.advices || [],
+      reminders: data.reminders || [],
+      dictionary: data.dictionary || DEFAULT_DICTIONARY,
+      settings: data.settings || initialSettings,
+      isInitialized: hasPasswordHash(),
+      currentMemberId: data.members && data.members.length > 0 ? data.members[0].id : null,
+    });
+
+    return true;
+  },
+
+  addMember: (member) => {
+    const newMember: FamilyMember = {
+      ...member,
+      id: generateId(),
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({
+      members: [...state.members, newMember],
+      currentMemberId: state.currentMemberId || newMember.id,
+    }));
+    get().saveData();
+  },
+
+  updateMember: (id, updates) => {
+    set((state) => ({
+      members: state.members.map((m) => (m.id === id ? { ...m, ...updates } : m)),
+    }));
+    get().saveData();
+  },
+
+  deleteMember: (id) => {
+    set((state) => ({
+      members: state.members.filter((m) => m.id !== id),
+      reports: state.reports.filter((r) => r.memberId !== id),
+      indicators: state.indicators.filter((i) => i.memberId !== id),
+      medications: state.medications.filter((m) => m.memberId !== id),
+      advices: state.advices.filter((a) => a.memberId !== id),
+      reminders: state.reminders.filter((r) => r.memberId !== id),
+      currentMemberId: state.currentMemberId === id ? null : state.currentMemberId,
+    }));
+    get().saveData();
+  },
+
+  addReport: (report) => {
+    const newReport: HealthReport = {
+      ...report,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+    };
+    set((state) => ({ reports: [...state.reports, newReport] }));
+    get().saveData();
+    return newReport.id;
+  },
+
+  addIndicators: (indicators) => {
+    const newIndicators: HealthIndicator[] = indicators.map((i) => ({
+      ...i,
+      id: generateId(),
+    }));
+    set((state) => ({ indicators: [...state.indicators, ...newIndicators] }));
+    get().saveData();
+  },
+
+  updateIndicator: (id, updates) => {
+    set((state) => ({
+      indicators: state.indicators.map((i) =>
+        i.id === id ? { ...i, ...updates, manualEdited: true } : i
+      ),
+    }));
+    get().saveData();
+  },
+
+  deleteIndicator: (id) => {
+    set((state) => ({
+      indicators: state.indicators.filter((i) => i.id !== id),
+    }));
+    get().saveData();
+  },
+
+  addMedication: (medication) => {
+    const newMedication: MedicationNote = {
+      ...medication,
+      id: generateId(),
+    };
+    set((state) => ({ medications: [...state.medications, newMedication] }));
+    get().saveData();
+  },
+
+  updateMedication: (id, updates) => {
+    set((state) => ({
+      medications: state.medications.map((m) =>
+        m.id === id ? { ...m, ...updates } : m
+      ),
+    }));
+    get().saveData();
+  },
+
+  deleteMedication: (id) => {
+    set((state) => ({
+      medications: state.medications.filter((m) => m.id !== id),
+    }));
+    get().saveData();
+  },
+
+  addAdvice: (advice) => {
+    const newAdvice: DoctorAdvice = {
+      ...advice,
+      id: generateId(),
+    };
+    set((state) => ({ advices: [...state.advices, newAdvice] }));
+    get().saveData();
+  },
+
+  updateAdvice: (id, updates) => {
+    set((state) => ({
+      advices: state.advices.map((a) =>
+        a.id === id ? { ...a, ...updates } : a
+      ),
+    }));
+    get().saveData();
+  },
+
+  deleteAdvice: (id) => {
+    set((state) => ({
+      advices: state.advices.filter((a) => a.id !== id),
+    }));
+    get().saveData();
+  },
+
+  addReminder: (reminder) => {
+    const newReminder: FollowUpReminder = {
+      ...reminder,
+      id: generateId(),
+    };
+    set((state) => ({ reminders: [...state.reminders, newReminder] }));
+    get().saveData();
+  },
+
+  updateReminder: (id, updates) => {
+    set((state) => ({
+      reminders: state.reminders.map((r) =>
+        r.id === id ? { ...r, ...updates } : r
+      ),
+    }));
+    get().saveData();
+  },
+
+  deleteReminder: (id) => {
+    set((state) => ({
+      reminders: state.reminders.filter((r) => r.id !== id),
+    }));
+    get().saveData();
+  },
+
+  addDictionaryItem: (item) => {
+    const newItem: IndicatorDictionary = {
+      ...item,
+      id: generateId(),
+    };
+    set((state) => ({ dictionary: [...state.dictionary, newItem] }));
+    get().saveData();
+  },
+
+  updateDictionaryItem: (id, updates) => {
+    set((state) => ({
+      dictionary: state.dictionary.map((d) =>
+        d.id === id ? { ...d, ...updates } : d
+      ),
+    }));
+    get().saveData();
+  },
+
+  updateSettings: (settings) => {
+    set((state) => ({
+      settings: { ...state.settings, ...settings },
+    }));
+    get().saveData();
+  },
+
+  resetAllData: () => {
+    clearAllData();
+    set({
+      ...initialAppState,
+      ...initialHealthData,
+    });
+  },
+
+  loadMockData: () => {
+    const mockData = createMockData();
+    set({
+      ...mockData,
+      isLocked: false,
+      isInitialized: true,
+      currentMemberId: mockData.members[0]?.id || null,
+    });
+    get().saveData();
+  },
+}));
+
+export function checkAppInitialized(): boolean {
+  return hasPasswordHash() && hasStoredData();
+}
