@@ -147,10 +147,10 @@ export default function TrendAnalysisPage() {
           };
         }
 
-        grouped[key].count = (grouped[key].count || 0) + 1;
         if (!grouped[key].dates?.includes(i.examDate)) {
           grouped[key].dates?.push(i.examDate);
         }
+        grouped[key].count = grouped[key].dates?.length || 0;
       });
 
       Object.keys(grouped).forEach((key) => {
@@ -250,11 +250,14 @@ export default function TrendAnalysisPage() {
 
     comparisonData.forEach((d) => {
       if (merged[d.key as string]) {
+        const existingDates = merged[d.key as string].dates || [];
+        const newDates = d.dates || [];
+        const uniqueDates = [...new Set([...existingDates, ...newDates])];
         merged[d.key as string] = {
           ...merged[d.key as string],
           ...d,
-          count: (merged[d.key as string].count || 0) + (d.count || 0),
-          dates: [...(merged[d.key as string].dates || []), ...(d.dates || [])],
+          count: uniqueDates.length,
+          dates: uniqueDates,
         };
       }
     });
